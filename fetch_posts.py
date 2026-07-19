@@ -12,69 +12,34 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from html import unescape
 
 SITE = "https://christine-seeman.com"
-API_BASE = SITE + "/wp-json/wp/v2"
 PUBLISHED_DIR = os.path.join(os.getcwd(), "published")
-PER_PAGE = 20
+TIMEOUT = 30
 
 
-def fetch_all_posts():
-    posts = []
+def fetch_paginated(api_base, resource):
+    items = []
     page = 1
     while True:
-        url = f"{API_BASE}/posts?per_page={PER_PAGE}&page={page}&_embed"
+        url = f"{api_base}/{resource}?per_page=100&page={page}"
         req = urllib.request.Request(url, headers={"User-Agent": "BlogArchiver/1.0"})
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 batch = json.loads(resp.read().decode())
-                if not batch:
-                    break
-                posts.extend(batch)
-                page += 1
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as e:
+            # WordPress returns 400 when the page number is past the last page
+            if e.code == 400:
+                break
+            raise
+        if not batch:
             break
-    return posts
-
-
-def fetch_categories():
-    cats = {}
-    page = 1
-    while True:
-        url = f"{API_BASE}/categories?per_page=100&page={page}"
-        req = urllib.request.Request(url, headers={"User-Agent": "BlogArchiver/1.0"})
-        try:
-            with urllib.request.urlopen(req) as resp:
-                batch = json.loads(resp.read().decode())
-                if not batch:
-                    break
-                for c in batch:
-                    cats[c["id"]] = unescape(c["name"])
-                page += 1
-        except urllib.error.HTTPError:
-            break
-    return cats
-
-
-def fetch_tags():
-    tags = {}
-    page = 1
-    while True:
-        url = f"{API_BASE}/tags?per_page=100&page={page}"
-        req = urllib.request.Request(url, headers={"User-Agent": "BlogArchiver/1.0"})
-        try:
-            with urllib.request.urlopen(req) as resp:
-                batch = json.loads(resp.read().decode())
-                if not batch:
-                    break
-                for t in batch:
-                    tags[t["id"]] = unescape(t["name"])
-                page += 1
-        except urllib.error.HTTPError:
-            break
-    return tags
+        items.extend(batch)
+        page += 1
+    return items
 
 
 def html_to_markdown(html):
@@ -172,19 +137,30 @@ def sanitize_filename(slug):
 
 
 def main():
-    global SITE, API_BASE
-    if len(sys.argv) > 1:
-        SITE = sys.argv[1].rstrip("/")
-        API_BASE = SITE + "/wp-json/wp/v2"
+    site = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else SITE
+    if not site.startswith("https://"):
+        print("Error: site URL must start with https://")
+        sys.exit(1)
+    api_base = site + "/wp-json/wp/v2"
 
     os.makedirs(PUBLISHED_DIR, exist_ok=True)
 
-    print("Fetching categories and tags...")
-    categories = fetch_categories()
-    tags = fetch_tags()
+    try:
+        print("Fetching categories and tags...")
+        categories = {
+            c["id"]: unescape(c["name"])
+            for c in fetch_paginated(api_base, "categories")
+        }
+        tags = {
+            t["id"]: unescape(t["name"]) for t in fetch_paginated(api_base, "tags")
+        }
 
-    print("Fetching posts...")
-    posts = fetch_all_posts()
+        print("Fetching posts...")
+        posts = fetch_paginated(api_base, "posts")
+    except urllib.error.URLError as e:
+        print(f"Error: request to {site} failed: {e}")
+        sys.exit(1)
+
     print(f"Found {len(posts)} posts")
 
     for post in sorted(posts, key=lambda p: p["date"]):
@@ -213,7 +189,7 @@ title: "{title.replace('"', '\\"')}"
 slug: "{slug}"
 date: {date}
 status: published
-url: "{SITE}/{slug}/"
+url: "{site}/{slug}/"
 categories: [{', '.join(f'"{c}"' for c in post_categories)}]
 tags: [{', '.join(f'"{t}"' for t in post_tags)}]
 excerpt: "{excerpt_text[:200].replace('"', '\\"')}"

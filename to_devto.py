@@ -18,10 +18,12 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 PROJECT_DIR = os.getcwd()
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+TIMEOUT = 30
 
 # Curly punctuation -> plain ASCII (keeps the author's no-fancy-punctuation
 # style). Built with chr() so this source file stays pure ASCII.
@@ -40,7 +42,7 @@ DASH_CLASS = "[|" + ENDASH + EMDASH + "-]"
 
 def fetch(url):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return resp.read().decode("utf-8", "replace")
 
 
@@ -150,12 +152,24 @@ def main():
         print("Usage: to_devto.py <post-url> [--tags a,b,c,d]")
         sys.exit(1)
     url = sys.argv[1].rstrip("/")
+    if not url.startswith("https://"):
+        print("Error: post URL must start with https://")
+        sys.exit(1)
     tags = ""
     if "--tags" in sys.argv:
         tags = ", ".join(sys.argv[sys.argv.index("--tags") + 1].split(",")).strip()
 
-    slug = url.rsplit("/", 1)[-1]
-    doc = fetch(url)
+    path = url.split("?")[0].split("#")[0].rstrip("/")
+    slug = re.sub(r"[^a-z0-9-]", "", path.rsplit("/", 1)[-1].lower())
+    if not slug:
+        print("Error: could not derive a slug from the URL")
+        sys.exit(1)
+
+    try:
+        doc = fetch(url)
+    except urllib.error.URLError as e:
+        print(f"Error: could not fetch {url}: {e}")
+        sys.exit(1)
 
     title = strip_title_suffix(meta(doc, "og:title") or "")
     if not title:

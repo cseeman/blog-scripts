@@ -6,13 +6,17 @@ import json
 import os
 import re
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 
 ENV_PATH = os.path.join(os.getcwd(), ".env")
+TIMEOUT = 30
 
 
 def load_env():
+    if not os.path.exists(ENV_PATH):
+        print("Error: .env not found. Create it with WP_URL, WP_USER, WP_APP_PASSWORD.")
+        sys.exit(1)
     env = {}
     with open(ENV_PATH) as f:
         for line in f:
@@ -47,12 +51,21 @@ def markdown_to_html(md):
     """Convert markdown to WordPress-compatible HTML."""
     html = md
 
-    # Code blocks (before other processing)
-    def replace_code_block(m):
-        code = m.group(1).replace("<", "&lt;").replace(">", "&gt;")
-        return f"<pre><code>{code}</code></pre>"
+    def escape_code(code):
+        return code.replace("<", "&lt;").replace(">", "&gt;")
 
-    html = re.sub(r"```\w*\n(.*?)```", replace_code_block, html, flags=re.DOTALL)
+    # Code blocks (before other processing)
+    html = re.sub(
+        r"```\w*\n(.*?)```",
+        lambda m: f"<pre><code>{escape_code(m.group(1))}</code></pre>",
+        html,
+        flags=re.DOTALL,
+    )
+
+    # Inline code
+    html = re.sub(
+        r"`([^`\n]+)`", lambda m: f"<code>{escape_code(m.group(1))}</code>", html
+    )
 
     # Headers
     for level in range(6, 0, -1):
@@ -83,7 +96,7 @@ def markdown_to_html(md):
     # Wrap remaining plain text paragraphs
     lines = html.split("\n\n")
     processed = []
-    block_tags = ("< h", "<pre", "<ul", "<ol", "<li", "<hr", "<block")
+    block_tags = ("<h", "<pre", "<ul", "<ol", "<li", "<block")
     for block in lines:
         block = block.strip()
         if not block:
@@ -97,85 +110,65 @@ def markdown_to_html(md):
     return html
 
 
-def resolve_category_ids(env, category_names):
-    if not category_names:
-        return []
-    url = f"{env['WP_URL']}/wp-json/wp/v2/categories?per_page=100"
+def wp_request(env, path, data=None):
+    url = f"{env['WP_URL']}/wp-json/wp/v2/{path}"
     credentials = base64.b64encode(
         f"{env['WP_USER']}:{env['WP_APP_PASSWORD']}".encode()
     ).decode()
-    req = urllib.request.Request(url, headers={
+    headers = {
         "User-Agent": "BlogPublisher/1.0",
         "Authorization": f"Basic {credentials}",
-    })
-    with urllib.request.urlopen(req) as resp:
-        existing = json.loads(resp.read().decode())
-
-    cat_map = {c["name"].lower(): c["id"] for c in existing}
-    ids = []
-    for name in category_names:
-        if name.lower() in cat_map:
-            ids.append(cat_map[name.lower()])
-        else:
-            new_id = create_term(env, "categories", name)
-            if new_id:
-                ids.append(new_id)
-    return ids
+    }
+    body = None
+    if data is not None:
+        body = json.dumps(data).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(
+        url, data=body, method="POST" if body else "GET", headers=headers
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return json.loads(resp.read().decode())
 
 
-def resolve_tag_ids(env, tag_names):
-    if not tag_names:
-        return []
-    url = f"{env['WP_URL']}/wp-json/wp/v2/tags?per_page=100"
-    credentials = base64.b64encode(
-        f"{env['WP_USER']}:{env['WP_APP_PASSWORD']}".encode()
-    ).decode()
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "BlogPublisher/1.0",
-        "Authorization": f"Basic {credentials}",
-    })
-    with urllib.request.urlopen(req) as resp:
-        existing = json.loads(resp.read().decode())
-
-    tag_map = {t["name"].lower(): t["id"] for t in existing}
-    ids = []
-    for name in tag_names:
-        if name.lower() in tag_map:
-            ids.append(tag_map[name.lower()])
-        else:
-            new_id = create_term(env, "tags", name)
-            if new_id:
-                ids.append(new_id)
-    return ids
+def fetch_all_terms(env, taxonomy):
+    terms = []
+    page = 1
+    while True:
+        try:
+            batch = wp_request(env, f"{taxonomy}?per_page=100&page={page}")
+        except urllib.error.HTTPError as e:
+            # WordPress returns 400 when the page number is past the last page
+            if e.code == 400:
+                break
+            raise
+        if not batch:
+            break
+        terms.extend(batch)
+        page += 1
+    return terms
 
 
 def create_term(env, taxonomy, name):
-    url = f"{env['WP_URL']}/wp-json/wp/v2/{taxonomy}"
-    credentials = base64.b64encode(
-        f"{env['WP_USER']}:{env['WP_APP_PASSWORD']}".encode()
-    ).decode()
-    data = json.dumps({"name": name}).encode()
-    req = urllib.request.Request(url, data=data, method="POST", headers={
-        "User-Agent": "BlogPublisher/1.0",
-        "Authorization": f"Basic {credentials}",
-        "Content-Type": "application/json",
-    })
     try:
-        with urllib.request.urlopen(req) as resp:
-            result = json.loads(resp.read().decode())
-            print(f"  Created {taxonomy[:-1]}: {name}")
-            return result["id"]
+        result = wp_request(env, taxonomy, {"name": name})
     except urllib.error.HTTPError as e:
         print(f"  Warning: could not create {taxonomy[:-1]} '{name}': {e}")
         return None
+    print(f"  Created {taxonomy[:-1]}: {name}")
+    return result["id"]
+
+
+def resolve_term_ids(env, taxonomy, names):
+    term_map = {t["name"].lower(): t["id"] for t in fetch_all_terms(env, taxonomy)}
+    ids = []
+    for name in names:
+        term_id = term_map.get(name.lower()) or create_term(env, taxonomy, name)
+        if term_id:
+            ids.append(term_id)
+    return ids
 
 
 def publish_draft(env, meta, body_html):
-    url = f"{env['WP_URL']}/wp-json/wp/v2/posts"
-    credentials = base64.b64encode(
-        f"{env['WP_USER']}:{env['WP_APP_PASSWORD']}".encode()
-    ).decode()
-
     post_data = {
         "title": meta.get("title", "Untitled"),
         "content": body_html,
@@ -190,23 +183,14 @@ def publish_draft(env, meta, body_html):
     categories = meta.get("categories", [])
     if isinstance(categories, list) and categories:
         print("Resolving categories...")
-        post_data["categories"] = resolve_category_ids(env, categories)
+        post_data["categories"] = resolve_term_ids(env, "categories", categories)
 
     tags = meta.get("tags", [])
     if isinstance(tags, list) and tags:
         print("Resolving tags...")
-        post_data["tags"] = resolve_tag_ids(env, tags)
+        post_data["tags"] = resolve_term_ids(env, "tags", tags)
 
-    data = json.dumps(post_data).encode()
-    req = urllib.request.Request(url, data=data, method="POST", headers={
-        "User-Agent": "BlogPublisher/1.0",
-        "Authorization": f"Basic {credentials}",
-        "Content-Type": "application/json",
-    })
-
-    with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read().decode())
-        return result
+    return wp_request(env, "posts", post_data)
 
 
 def main():
@@ -216,7 +200,7 @@ def main():
 
     filepath = sys.argv[1]
     if not os.path.exists(filepath):
-        print(f"Error: file not found: {sys.argv[1]}")
+        print(f"Error: file not found: {filepath}")
         sys.exit(1)
 
     env = load_env()
@@ -224,6 +208,10 @@ def main():
         if key not in env:
             print(f"Error: {key} not set in .env")
             sys.exit(1)
+    env["WP_URL"] = env["WP_URL"].rstrip("/")
+    if not env["WP_URL"].startswith("https://"):
+        print("Error: WP_URL must start with https:// to protect credentials")
+        sys.exit(1)
 
     with open(filepath, encoding="utf-8") as f:
         content = f.read()
@@ -236,15 +224,18 @@ def main():
 
     try:
         result = publish_draft(env, meta, body_html)
-        print(f"\nDraft created successfully!")
-        print(f"  ID:    {result['id']}")
-        print(f"  Edit:  {env['WP_URL']}/wp-admin/post.php?post={result['id']}&action=edit")
-        print(f"  Preview: {result['link']}")
     except urllib.error.HTTPError as e:
-        body = e.read().decode()
         print(f"Error {e.code}: {e.reason}")
-        print(body)
+        print(e.read().decode())
         sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Error: could not reach {env['WP_URL']}: {e.reason}")
+        sys.exit(1)
+
+    print("\nDraft created successfully!")
+    print(f"  ID:    {result['id']}")
+    print(f"  Edit:  {env['WP_URL']}/wp-admin/post.php?post={result['id']}&action=edit")
+    print(f"  Preview: {result['link']}")
 
 
 if __name__ == "__main__":
