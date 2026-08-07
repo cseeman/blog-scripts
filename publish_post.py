@@ -11,6 +11,7 @@ import urllib.request
 
 ENV_PATH = os.path.join(os.getcwd(), ".env")
 TIMEOUT = 30
+TERM_LABELS = {"categories": "category", "tags": "tag"}
 
 
 def load_env():
@@ -149,12 +150,13 @@ def fetch_all_terms(env, taxonomy):
 
 
 def create_term(env, taxonomy, name):
+    label = TERM_LABELS.get(taxonomy, taxonomy)
     try:
         result = wp_request(env, taxonomy, {"name": name})
     except urllib.error.HTTPError as e:
-        print(f"  Warning: could not create {taxonomy[:-1]} '{name}': {e}")
+        print(f"  Warning: could not create {label} '{name}': {e}")
         return None
-    print(f"  Created {taxonomy[:-1]}: {name}")
+    print(f"  Created {label}: {name}")
     return result["id"]
 
 
