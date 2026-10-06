@@ -12,6 +12,7 @@ import urllib.request
 ENV_PATH = os.path.join(os.getcwd(), ".env")
 TIMEOUT = 30
 TERM_LABELS = {"categories": "category", "tags": "tag"}
+IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 def load_env():
@@ -81,11 +82,11 @@ def markdown_to_html(md):
     html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html)
     html = re.sub(r"\*(.+?)\*", r"<em>\1</em>", html)
 
+    # Images before links, or ![alt](src) becomes !<a ...>
+    html = IMAGE_PATTERN.sub(r'<img src="\2" alt="\1" />', html)
+
     # Links
     html = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', html)
-
-    # Images
-    html = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r'<img src="\2" alt="\1" />', html)
 
     # Horizontal rules
     html = re.sub(r"^---+$", "<hr />", html, flags=re.MULTILINE)
