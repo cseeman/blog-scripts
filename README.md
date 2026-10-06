@@ -8,7 +8,7 @@ The workflow these support:
 
 1. Write a post as markdown with YAML front matter.
 2. `publish_post.py` pushes it to WordPress as a draft via the REST API.
-3. Finalize and publish in wp-admin (images, formatting tweaks, scheduling).
+3. Finalize and publish in wp-admin (formatting tweaks, scheduling).
 4. `fetch_posts.py` pulls the published posts back down as markdown, so the
    local directory stays an archive of what is actually live.
 5. `to_devto.py` converts the live post into dev.to-ready markdown with a
@@ -47,6 +47,13 @@ publishes directly.
 ```
 python3 path/to/publish_post.py drafts/my-post.md
 ```
+
+Images referenced by a relative path, like
+`![alt](../assets/my-post/photo.jpg)`, are uploaded to the Media Library
+first and the post points at the uploaded copy. Paths resolve from the
+markdown file's directory, and the alt text carries over. Re-running the
+script uploads the images again, so delete the duplicates in wp-admin.
+`publish_post_gutenberg.py` does the same, except with `--dry-run`.
 
 ## fetch_posts.py
 

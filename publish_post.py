@@ -3,10 +3,12 @@
 
 import base64
 import json
+import mimetypes
 import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ENV_PATH = os.path.join(os.getcwd(), ".env")
@@ -112,15 +114,19 @@ def markdown_to_html(md):
     return html
 
 
-def wp_request(env, path, data=None):
-    url = f"{env['WP_URL']}/wp-json/wp/v2/{path}"
+def auth_headers(env):
     credentials = base64.b64encode(
         f"{env['WP_USER']}:{env['WP_APP_PASSWORD']}".encode()
     ).decode()
-    headers = {
+    return {
         "User-Agent": "BlogPublisher/1.0",
         "Authorization": f"Basic {credentials}",
     }
+
+
+def wp_request(env, path, data=None):
+    url = f"{env['WP_URL']}/wp-json/wp/v2/{path}"
+    headers = auth_headers(env)
     body = None
     if data is not None:
         body = json.dumps(data).encode()
@@ -130,6 +136,53 @@ def wp_request(env, path, data=None):
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return json.loads(resp.read().decode())
+
+
+def upload_media(env, path, alt_text):
+    content_type = mimetypes.guess_type(path)[0]
+    if not content_type or not content_type.startswith("image/"):
+        print(f"Error: not an image: {path}")
+        sys.exit(1)
+    query = urllib.parse.urlencode({"alt_text": alt_text})
+    headers = auth_headers(env)
+    headers["Content-Type"] = content_type
+    headers["Content-Disposition"] = f'attachment; filename="{os.path.basename(path)}"'
+    with open(path, "rb") as f:
+        req = urllib.request.Request(
+            f"{env['WP_URL']}/wp-json/wp/v2/media?{query}",
+            data=f.read(),
+            method="POST",
+            headers=headers,
+        )
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return json.loads(resp.read().decode())["source_url"]
+
+
+def local_image_path(src, base_dir):
+    if re.match(r"^https?://", src):
+        return None
+    return os.path.normpath(os.path.join(base_dir, src))
+
+
+def upload_local_images(env, body_md, base_dir):
+    """Upload images referenced by relative path and point the markdown at the WordPress copy."""
+    # Check every path before uploading so a typo can't leave half the images orphaned on the site
+    for match in IMAGE_PATTERN.finditer(body_md):
+        path = local_image_path(match.group(2), base_dir)
+        if path and not os.path.exists(path):
+            print(f"Error: image not found: {match.group(2)}")
+            sys.exit(1)
+
+    def replace(match):
+        alt, src = match.group(1), match.group(2)
+        path = local_image_path(src, base_dir)
+        if not path:
+            return match.group(0)
+        url = upload_media(env, path, alt)
+        print(f"  Uploaded {src}")
+        return f"![{alt}]({url})"
+
+    return IMAGE_PATTERN.sub(replace, body_md)
 
 
 def fetch_all_terms(env, taxonomy):
@@ -220,13 +273,13 @@ def main():
         content = f.read()
 
     meta, body_md = parse_front_matter(content)
-    body_html = markdown_to_html(body_md)
 
     print(f"Publishing draft: {meta.get('title', 'Untitled')}")
     print(f"  Slug: {meta.get('slug', '(none)')}")
 
     try:
-        result = publish_draft(env, meta, body_html)
+        body_md = upload_local_images(env, body_md, os.path.dirname(filepath))
+        result = publish_draft(env, meta, markdown_to_html(body_md))
     except urllib.error.HTTPError as e:
         print(f"Error {e.code}: {e.reason}")
         print(e.read().decode())
