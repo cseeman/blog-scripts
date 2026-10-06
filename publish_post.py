@@ -155,7 +155,7 @@ def upload_media(env, path, alt_text):
             headers=headers,
         )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        return json.loads(resp.read().decode())["source_url"]
+        return json.loads(resp.read().decode())
 
 
 def local_image_path(src, base_dir):
@@ -164,25 +164,40 @@ def local_image_path(src, base_dir):
     return os.path.normpath(os.path.join(base_dir, src))
 
 
-def upload_local_images(env, body_md, base_dir):
-    """Upload images referenced by relative path and point the markdown at the WordPress copy."""
+def upload_images(env, meta, body_md, base_dir):
+    """Upload local images, point the markdown at the WordPress copies, and return the featured image's media ID."""
+    featured = meta.get("featured_image", "")
+    featured_alt = meta.get("featured_image_alt", "")
+    if featured and not local_image_path(featured, base_dir):
+        print("Error: featured_image must be a local path")
+        sys.exit(1)
+
     # Check every path before uploading so a typo can't leave half the images orphaned on the site
-    for match in IMAGE_PATTERN.finditer(body_md):
-        path = local_image_path(match.group(2), base_dir)
+    sources = [match.group(2) for match in IMAGE_PATTERN.finditer(body_md)]
+    for src in sources + ([featured] if featured else []):
+        path = local_image_path(src, base_dir)
         if path and not os.path.exists(path):
-            print(f"Error: image not found: {match.group(2)}")
+            print(f"Error: image not found: {src}")
             sys.exit(1)
+
+    uploads = {}
+
+    def upload(src, alt):
+        path = local_image_path(src, base_dir)
+        if path not in uploads:
+            uploads[path] = upload_media(env, path, alt)
+            print(f"  Uploaded {src}")
+        return uploads[path]
 
     def replace(match):
         alt, src = match.group(1), match.group(2)
-        path = local_image_path(src, base_dir)
-        if not path:
+        if not local_image_path(src, base_dir):
             return match.group(0)
-        url = upload_media(env, path, alt)
-        print(f"  Uploaded {src}")
-        return f"![{alt}]({url})"
+        return f"![{alt}]({upload(src, alt)['source_url']})"
 
-    return IMAGE_PATTERN.sub(replace, body_md)
+    body_md = IMAGE_PATTERN.sub(replace, body_md)
+    featured_id = upload(featured, featured_alt)["id"] if featured else None
+    return body_md, featured_id
 
 
 def fetch_all_terms(env, taxonomy):
@@ -224,13 +239,16 @@ def resolve_term_ids(env, taxonomy, names):
     return ids
 
 
-def publish_draft(env, meta, body_html):
+def publish_draft(env, meta, body_html, featured_media=None):
     post_data = {
         "title": meta.get("title", "Untitled"),
         "content": body_html,
         "status": "draft",
         "slug": meta.get("slug", ""),
     }
+
+    if featured_media:
+        post_data["featured_media"] = featured_media
 
     excerpt = meta.get("excerpt", "")
     if excerpt:
@@ -278,8 +296,8 @@ def main():
     print(f"  Slug: {meta.get('slug', '(none)')}")
 
     try:
-        body_md = upload_local_images(env, body_md, os.path.dirname(filepath))
-        result = publish_draft(env, meta, markdown_to_html(body_md))
+        body_md, featured_id = upload_images(env, meta, body_md, os.path.dirname(filepath))
+        result = publish_draft(env, meta, markdown_to_html(body_md), featured_id)
     except urllib.error.HTTPError as e:
         print(f"Error {e.code}: {e.reason}")
         print(e.read().decode())

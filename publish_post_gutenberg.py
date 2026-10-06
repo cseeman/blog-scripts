@@ -24,7 +24,7 @@ import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from publish_post import load_env, parse_front_matter, publish_draft, upload_local_images
+from publish_post import load_env, parse_front_matter, publish_draft, upload_images
 
 SEPARATOR_BLOCK = (
     "<!-- wp:separator -->\n"
@@ -248,8 +248,8 @@ def main():
     print(f"  Slug: {meta.get('slug', '(none)')}")
 
     try:
-        body_md = upload_local_images(env, body_md, os.path.dirname(filepath))
-        result = publish_draft(env, meta, markdown_to_blocks(body_md))
+        body_md, featured_id = upload_images(env, meta, body_md, os.path.dirname(filepath))
+        result = publish_draft(env, meta, markdown_to_blocks(body_md), featured_id)
     except urllib.error.HTTPError as e:
         print(f"Error {e.code}: {e.reason}")
         print(e.read().decode())

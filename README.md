@@ -53,6 +53,14 @@ Images referenced by a relative path, like
 first and the post points at the uploaded copy. Paths resolve from the
 markdown file's directory, and the alt text carries over. Re-running the
 script uploads the images again, so delete the duplicates in wp-admin.
+Set a featured image the same way from the front matter:
+
+```
+featured_image: ../assets/my-post/hero.jpg
+featured_image_alt: Mountains at sunrise
+```
+
+An image used both as the featured image and in the body uploads once.
 `publish_post_gutenberg.py` does the same, except with `--dry-run`.
 
 ## fetch_posts.py
