@@ -80,6 +80,18 @@ def strip_size(url):
     return re.sub(r"-\d+x\d+(\.\w+)$", r"\1", url)
 
 
+def table_to_markdown(raw):
+    rows = []
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", raw, re.DOTALL):
+        cells = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.DOTALL)
+        rows.append([inline(c).replace("|", "\\|").replace("\n", " ") for c in cells])
+    if not rows:
+        return None
+    lines = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * len(rows[0])]
+    lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
+    return "\n".join(lines)
+
+
 def convert_body(body):
     block_re = re.compile(
         r"<h([1-6])[^>]*>(.*?)</h\1>"
@@ -87,13 +99,16 @@ def convert_body(body):
         r"|<ul[^>]*>(.*?)</ul>"
         r"|<ol[^>]*>(.*?)</ol>"
         r"|<figure[^>]*>(.*?)</figure>"
+        r"|<table[^>]*>(.*?)</table>"
         r"|<blockquote[^>]*>(.*?)</blockquote>"
         r"|<p[^>]*>(.*?)</p>",
         re.DOTALL,
     )
     out = []
     for mo in block_re.finditer(body):
-        hlevel, htext, pre, ul, ol, fig, quote, p = mo.groups()
+        hlevel, htext, pre, ul, ol, fig, table, quote, p = mo.groups()
+        if fig is not None and "<table" in fig:
+            table, fig = fig, None
         if htext is not None:
             out.append("#" * int(hlevel) + " " + inline(htext))
         elif pre is not None:
@@ -117,6 +132,10 @@ def convert_body(body):
             if cap:
                 block += "\n*" + inline(cap.group(1)) + "*"
             out.append(block)
+        elif table is not None:
+            md = table_to_markdown(table)
+            if md:
+                out.append(md)
         elif quote is not None:
             paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", quote, re.DOTALL) or [quote]
             lines = []
