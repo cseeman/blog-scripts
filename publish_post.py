@@ -90,6 +90,24 @@ def markdown_to_html(md):
     # Links
     html = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', html)
 
+    # Tables: header row, separator row, body rows
+    def table(m):
+        rows = [row.strip().strip("|").split("|") for row in m.group(0).strip().split("\n")]
+
+        def cells(row, tag):
+            return "".join(f"<{tag}>{cell.strip()}</{tag}>" for cell in row)
+
+        body = "".join(f"<tr>{cells(row, 'td')}</tr>\n" for row in rows[2:])
+        return (
+            f'<figure class="wp-block-table"><table>\n'
+            f"<thead><tr>{cells(rows[0], 'th')}</tr></thead>\n"
+            f"<tbody>\n{body}</tbody>\n</table></figure>"
+        )
+
+    html = re.sub(
+        r"^\|.*\|\n\|[\s:|-]+\|\n(?:\|.*\|(?:\n|$))*", table, html, flags=re.MULTILINE
+    )
+
     # Horizontal rules
     html = re.sub(r"^---+$", "<hr />", html, flags=re.MULTILINE)
 
@@ -100,7 +118,7 @@ def markdown_to_html(md):
     # Wrap remaining plain text paragraphs
     lines = html.split("\n\n")
     processed = []
-    block_tags = ("<h", "<pre", "<ul", "<ol", "<li", "<block")
+    block_tags = ("<h", "<pre", "<ul", "<ol", "<li", "<block", "<figure")
     for block in lines:
         block = block.strip()
         if not block:
