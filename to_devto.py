@@ -87,12 +87,13 @@ def convert_body(body):
         r"|<ul[^>]*>(.*?)</ul>"
         r"|<ol[^>]*>(.*?)</ol>"
         r"|<figure[^>]*>(.*?)</figure>"
+        r"|<blockquote[^>]*>(.*?)</blockquote>"
         r"|<p[^>]*>(.*?)</p>",
         re.DOTALL,
     )
     out = []
     for mo in block_re.finditer(body):
-        hlevel, htext, pre, ul, ol, fig, p = mo.groups()
+        hlevel, htext, pre, ul, ol, fig, quote, p = mo.groups()
         if htext is not None:
             out.append("#" * int(hlevel) + " " + inline(htext))
         elif pre is not None:
@@ -116,6 +117,18 @@ def convert_body(body):
             if cap:
                 block += "\n*" + inline(cap.group(1)) + "*"
             out.append(block)
+        elif quote is not None:
+            paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", quote, re.DOTALL) or [quote]
+            lines = []
+            for paragraph in paragraphs:
+                if lines:
+                    lines.append(">")
+                text = inline(paragraph)
+                if not text:
+                    continue
+                lines.extend("> " + ln if ln else ">" for ln in text.split("\n"))
+            if lines:
+                out.append("\n".join(lines))
         elif p is not None:
             t = inline(p)
             if not t:
