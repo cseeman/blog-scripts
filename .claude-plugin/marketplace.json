@@ -1,0 +1,11 @@
+{
+  "name": "blog-scripts",
+  "owner": { "name": "Christine Seeman" },
+  "plugins": [
+    {
+      "name": "publish-wp",
+      "source": "./publish-wp",
+      "description": "WordPress blog publishing workflow: draft, style-check, publish, sync, dev.to conversion"
+    }
+  ]
+}

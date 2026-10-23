@@ -96,6 +96,21 @@ normalizes curly quotes and dashes to plain ASCII, and writes
 The result is also copied to the clipboard (macOS `pbcopy`) for pasting
 into the dev.to editor.
 
+## Claude Code plugin: publish-wp
+
+This repo is also a Claude Code plugin marketplace. The `publish-wp` plugin
+wraps the scripts above as skills (scaffold a draft, style-check for
+AI-sounding tells, publish, sync, dev.to conversion) so the whole workflow
+runs from a Claude Code session.
+
+```
+/plugin marketplace add cseeman/blog-scripts
+/plugin install publish-wp@blog-scripts
+```
+
+See [publish-wp/README.md](publish-wp/README.md) for the skill list and
+permission model.
+
 ## Caveats
 
 - The markdown/HTML conversion is regex-based and intentionally simple. It

@@ -1,0 +1,9 @@
+{
+  "name": "publish-wp",
+  "version": "0.1.0",
+  "description": "WordPress blog publishing workflow: scaffold drafts, style-check for AI tells, publish via REST API, sync live edits, convert for dev.to",
+  "author": { "name": "Christine Seeman", "url": "https://github.com/cseeman" },
+  "repository": "https://github.com/cseeman/blog-scripts",
+  "license": "MIT",
+  "keywords": ["wordpress", "blogging", "devto"]
+}
