@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import sys
+import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -59,11 +60,12 @@ def markdown_to_html(md):
         return code.replace("<", "&lt;").replace(">", "&gt;")
 
     # Code blocks (before other processing)
+    # A fence indented under a list item carries that indent into every line.
     html = re.sub(
-        r"```\w*\n(.*?)```",
-        lambda m: f"<pre><code>{escape_code(m.group(1))}</code></pre>",
+        r"^[ \t]*```\w*\n(.*?)^[ \t]*```",
+        lambda m: f"<pre><code>{escape_code(textwrap.dedent(m.group(1)).rstrip())}</code></pre>",
         html,
-        flags=re.DOTALL,
+        flags=re.DOTALL | re.MULTILINE,
     )
 
     # Inline code
