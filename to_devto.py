@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import urllib.error
 import urllib.request
 
@@ -114,7 +115,7 @@ def convert_body(body):
         elif pre is not None:
             lang = re.search(r'<code[^>]*class="[^"]*language-([\w-]+)', pre)
             code = re.sub(r"</?code[^>]*>", "", pre)
-            code = html.unescape(code).strip("\n")
+            code = textwrap.dedent(html.unescape(code)).strip("\n").rstrip()
             out.append(f"```{lang.group(1) if lang else ''}\n{code}\n```")
         elif ul is not None or ol is not None:
             raw = ul if ul is not None else ol
